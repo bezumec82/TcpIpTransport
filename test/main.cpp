@@ -5,14 +5,14 @@
 
 bool keepRunning = true;
 
-using byte = uint8_t;
-void serverReadCallBack( ::std::string clientAddr, ::std::vector< byte > data )
+/*--------------------------*/
+/*--- Server's callbacks ---*/
+/*--------------------------*/
+void serverReadCallBack( ::std::string data )
 {
-    ::std::string strData( reinterpret_cast< char* >( data.data() ), data.size() ); //bad but tolerable
     ::std::cout << __func__ << " : "
                 << "Server received data : \n\t" 
-                << strData << '\n'
-                << "From client : " << clientAddr << ::std::endl;
+                << data << ::std::endl;
 }
 
 void serverSendCallBack( ::std::size_t sent_bytes )
@@ -23,13 +23,19 @@ void serverSendCallBack( ::std::size_t sent_bytes )
                 << ::std::endl;
 }
 
-/*                       Unification : */
-void clientReadCallBack( ::std::string , ::std::vector< byte > data )
+void serverErrorCallBack( const ::std::string& error )
 {
-    ::std::string strData( reinterpret_cast< char* >( data.data() ), data.size() ); //bad but tolerable
+    ::std::cout << "Received error : '" << error << "'"<< ::std::endl;
+}
+
+/*--------------------------*/
+/*--- Client's callbacks ---*/
+/*--------------------------*/
+void clientReadCallBack( ::std::string data )
+{
     ::std::cout << __func__ << " : "
                 << "Client received data : \n\t" 
-                << strData << ::std::endl;
+                << data << ::std::endl;
 }
 
 void clientSendCallBack( ::std::size_t sent_bytes )
@@ -40,8 +46,13 @@ void clientSendCallBack( ::std::size_t sent_bytes )
                 << ::std::endl;
 }
 
+void clientErrorCallBack( const ::std::string& error)
+{
+    ::std::cout << "Received error from server : '" << error << ::std::endl;
+}
 
-void sigIngHandler ( int signal )
+
+void sigIntHandler ( int signal )
 {
     keepRunning = false;
 }
@@ -59,10 +70,11 @@ int main( int, char** )
     ::TcpIp::Server server;
     ::TcpIp::Server::Config serverConfig = 
     {
-        .m_recv_cb = serverReadCallBack,
-        .m_send_cb = serverSendCallBack,
-        .m_address      = LOCAL_HOST_IP,
-        .m_port_num      = PORT_TO_USE,
+        .m_recv_cb  = serverReadCallBack,
+        .m_send_cb  = serverSendCallBack,
+        .m_error_cb = serverErrorCallBack,
+        .m_address  = LOCAL_HOST_IP,
+        .m_port_num = PORT_TO_USE,
     };
     server.setConfig( ::std::move( serverConfig ) );
     server.start();
@@ -70,30 +82,25 @@ int main( int, char** )
     ::TcpIp::Client client;
     ::TcpIp::Client::Config clientConfig = 
     {
-        .m_recv_cb = clientReadCallBack,
-        .m_send_cb = clientSendCallBack,
-        .m_address      = LOCAL_HOST_IP,
-        .m_port_num      = PORT_TO_USE,
+        .m_recv_cb  = clientReadCallBack,
+        .m_send_cb  = clientSendCallBack,
+        .m_error_cb = clientErrorCallBack,
+        .m_address  = LOCAL_HOST_IP,
+        .m_port_num = PORT_TO_USE,
     };
     client.setConfig( ::std::move( clientConfig ) );
     client.start();
 
-    std::signal(SIGINT, sigIngHandler);
+    std::signal(SIGINT, sigIntHandler);
 
     while (keepRunning)
     {
         ::std::this_thread::sleep_for( TRANSACTION_DELAY );
         client.send( ::std::string{ "DATA_FROM_CLIENT" } );
-        ::std::cout << "--" << ::std::endl;
-
-        /* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
-        /* !!!Make human readable authentication as in UnixServer!!! */
-        /* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+        ::std::cout << "--" << ::std::endl
 
         ::std::this_thread::sleep_for( TRANSACTION_DELAY );
-        server.send< ::std::string >( 
-                    ::std::string{ LOCAL_HOST_IP },
-                    ::std::string{ "DATA_TO_CLIENT" } );
+        server.broadCast< ::std::string >( ::std::string{ "DATA_TO_CLIENTs" } );
         ::std::cout << "--" << ::std::endl;
     }
 }

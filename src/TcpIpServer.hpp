@@ -5,27 +5,50 @@
 
 namespace TcpIp
 {
-/* Wrapper around 'Session.send' */
+
 template< typename Data >
-Result Server::send( const ::std::string& address, Data&& data )
+Result Server::send( SessionView& session, Data&& data )
 {
-    if( ! m_is_started.load() )
+    if( session.getValid() )
     {
-        PRINT_ERR( "Trying to use not started server.\n" );
-        throw ::std::runtime_error( "Trying to use not started server.\n" );
+        session.session()->send( ::std::forward<Data>(data) );
+        return Result::SEND_SUCCESS;
+    }
+    else
+    {
         return Result::SEND_ERROR;
     }
-    /* Hash will be better here : use 'unordered_map' */
-    for( auto & it : m_sessions )
+}
+
+template< typename SessionViewList, typename Data >
+Result Server::multiCast( SessionViewList&& sessions, Data&& data )
+{
+    for( auto& it : sessions )
     {
-        if ( it.getIp() == address )
-        {
-            it.send( ::std::forward<Data>(data) ); //perfect forwarding
-            return Result::SEND_SUCCESS; 
-        }
-    } //end for
-    return Result::NO_SUCH_CLIENT;
-}//end send
+        this->send( it, ::std::forward<Data>(data) );
+    }
+}
+
+template< typename Data >
+Result Server::broadCast( Data&& data )
+{
+    ::std::lock_guard< ::std::mutex > lock( m_sessions_mtx ); //access to sessions
+    for( auto& it : m_sessions )
+    {
+        if( it.getValid() )
+            it.send( ::std::forward<Data>(data) );
+    }
+    return Result::SEND_SUCCESS;
+}
+
+template< typename SessionType >
+void Server::removeSession( SessionType&& session )
+{
+    PRINTF( RED, "Removing session.\n" );
+    ::std::lock_guard< ::std::mutex > lock( m_sessions_mtx );
+    m_sessions.erase( session.session() );
+}
+
 
 } //end namespace TcpIp
 

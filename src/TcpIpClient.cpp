@@ -22,6 +22,12 @@ Result TcpIp::Client::setConfig( Config&& cfg ) /* Save config */
         PRINT_ERR( "No send callback provided.\n" );
         return Result::CFG_ERROR;
     }
+    if( ! m_config.m_error_cb )
+    {
+        PRINT_ERR( "No send callback provided.\n" );
+        return Result::CFG_ERROR;
+    }
+
     m_address = 
         boost::asio::ip::make_address( m_config.m_address, error );
     if( error )
@@ -39,12 +45,8 @@ Result Client::start( void )
 {
     if( ! m_is_configured.load() )
     {
-    #if (0)
         PRINT_ERR( "Server has no configuration.\n" );
-        return Result::CFG_ERROR;
-    #else
         throw ::std::runtime_error( "Server has no configuration.\n" );
-    #endif
     }
     ::std::cout << "Starting TcpIp client. Server address : " 
                 << m_config.m_address <<::std::endl;
@@ -96,7 +98,7 @@ void Client::recv( void )
                 }
                 return;
             }
-            m_config.m_recv_cb( "", * readBuf_shptr );
+            m_config.m_recv_cb( * readBuf_shptr );
             this->recv();
         } ); //end async_read_until
 }

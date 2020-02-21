@@ -13,7 +13,6 @@
 namespace TcpIp
 {
     class Server; //forward
-
     using byte = uint8_t;
 
     using IoService = ::boost::asio::io_service;
@@ -28,13 +27,9 @@ namespace TcpIp
     using Acceptor = ::boost::asio::ip::tcp::acceptor;
     using AcceptorUptr = ::std::unique_ptr<Acceptor>;
 
-    using Buffer = ::std::vector< byte >;
+    using Buffer = ::std::string;
     using BufferShPtr = ::std::shared_ptr< Buffer >;
-    
-    /* Who and what */
-    using RecvCallBack  = ::std::function< void( ::std::string, Buffer ) >;
-    /* How many was really send - POSIX style */
-    using SendCallBack  = ::std::function< void( ::std::size_t ) >;
+    using ErrorDescription = ::std::string;
 }
 
 
@@ -51,35 +46,45 @@ namespace TcpIp
         CFG_ERROR           = -2,
         WRONG_IP_ADDRESS    = -1,
         ALL_GOOD            = 0,
-        SEND_SUCCESS        = 4,
+        SEND_SUCCESS        = 1,
     };
 
-    class Server
-    { /* Default constructable */
-    class Session;
-    using SessionShptr = ::std::shared_ptr< Session >;
-    //using Sessions = ::std::vector< SessionShptr >;
-    using Sessions = ::std::list< Session >;
-    using SessionHandle = Sessions::iterator;
+    class Server /* Default constructable */
+    {
+    private : /*--- Forward declarations ---*/
+        class Session;
+    public :
+        class SessionView;
 
-    /*--- Structures/Classes/Enums ---*/
-    public :    
+    public : /*--- Aliases ---*/
+        using SessionShptr = ::std::shared_ptr< Session >;
+        using Sessions = ::std::list< Session >;
+        using SessionHandle = Sessions::iterator;
+
+        using RecvCallBack  = void( const SessionView&, ::std::string& );
+        using SendCallBack  = void( const SessionView&, ::std::size_t );
+        using ErrorCallBack = void( const SessionView&, const ErrorDescription& );
+
+    public : /*--- Structures/Classes/Enums ---*/
         struct Config
         {
             /* Can be used directly in async calls */
-            RecvCallBack    m_recv_cb; 
-            SendCallBack    m_send_cb;
+            ::std::function< RecvCallBack >  m_recv_cb;
+            ::std::function< SendCallBack >  m_send_cb;
+            ::std::function< ErrorCallBack > m_error_cb;
             ::std::string   m_address; /* IP address to use */
             uint16_t        m_port_num;
         }; //end struct Config
 
-    private :
+    private : /* No access to the Session from outside */
         class Session
         {
+            friend class Server; //access to the flags
         public: /*--- Methods ---*/
             /* Session knows about its parent - class Server */
             Session(IoService& io_service, Server * parent)
-                : m_socket( io_service ),
+                : m_io_service_ref( io_service ),
+                m_socket( io_service ),
                 m_parent_ptr( parent )
             { }
 
@@ -95,20 +100,54 @@ namespace TcpIp
                 address << m_socket.remote_endpoint().address();
                 return address.str();
             }
-            void saveHandle( SessionHandle self )
+            void saveHandle( SessionHandle& self )
             {
-                m_self = self;
+                m_self = ::std::make_unique< SessionView >( self );
+            }
+            void setValid( bool state )
+            {
+                m_self->m_is_valid.store( state );
+            }
+            bool getValid()
+            {
+                return m_self->m_is_valid.load();
             }
             /* Taking self to prevent destruction shared ptr */
             void recv( void );
             template< typename Data >
             Result send( Data&& );
-            ~Session();      
+            ~Session();
         private:  /*--- Variables ---*/
+            IoService& m_io_service_ref;
             Socket m_socket;
             Server * m_parent_ptr;
-            SessionHandle m_self;
+            ::std::unique_ptr< SessionView > m_self;
         }; //end class Session
+
+    public :
+        class SessionView
+        {
+            friend class Server;
+            friend class Session;
+        public : /*--- Constructor ---*/
+            SessionView( SessionHandle& session )
+            : m_session( session )
+            { }
+        private : /*--- Getters/Setters ---*/
+            SessionHandle& session()
+            {
+                return m_session;
+            }
+        public :
+            bool getValid()
+            {
+                m_is_valid.load();
+            }
+        private : /*--- Variables ---*/
+            SessionHandle& m_session;
+        private : /*--- Flags ---*/
+            ::std::atomic< bool > m_is_valid{ false };
+        }; //end class SessionView
 
     public : /*--- Methods ---*/
         Result setConfig( Config&& );
@@ -117,37 +156,54 @@ namespace TcpIp
             return m_config;
         }
         Result start( void );
-        /* Send function is callable, recv is event. */
+
+        /* Send function is callable, recv is event. */;
         template< typename Data >
-        Result send( const ::std::string&, Data&& );
+            Result send( SessionView& , Data&& );
+        template< typename SessionViewList , typename Data >
+            Result multiCast( SessionViewList&& , Data&& );
+        template< typename Data >
+            Result broadCast( Data&& );
+
+        template< typename SessionType >
+            void removeSession( SessionType&& );
         ~Server();
     private :
         void accept( void );
-        /* Maybe useful */
-        void closeAllSessions( void );
-        
+
     private : /*--- Variables ---*/
         Config m_config;
         AcceptorUptr m_acceptor_uptr;
         EndPointUptr m_endpoint_uptr;
-        Sessions m_sessions;        
+        Sessions m_sessions;
+        ::std::mutex m_sessions_mtx; //protect access to the sessions data
+
         IpAddress m_address;
 
         IoService m_io_service; //Server has its own io_service
         ::std::thread m_worker;
+        ::std::future<void> m_future;
         /*--- Flags ---*/
         ::std::atomic< bool > m_is_configured{ false };
         ::std::atomic< bool > m_is_started{ false };
-    };
+    }; //end class Server
+
+
 
     class Client
     {
+    public : /*--- Aliases ---*/
+        using RecvCallBack  = void( ::std::string& );
+        using SendCallBack  = void( ::std::size_t );
+        using ErrorCallBack = void( const ErrorDescription& );
+
     public : /*--- Structures/Classes/enums ---*/
         struct Config
         {
-            /* Can be used directly in async calls */
-            RecvCallBack m_recv_cb; 
-            SendCallBack m_send_cb;
+            ::std::function< RecvCallBack >   m_recv_cb;
+            ::std::function< SendCallBack >   m_send_cb;
+            ::std::function< ErrorCallBack >  m_error_cb;
+
             ::std::string m_address;
             uint16_t m_port_num;
         }; //end struct Config
@@ -157,15 +213,15 @@ namespace TcpIp
         Result start( void );
         template< typename Data >
         void send( Data&& data );
-        ~Client() 
-        { 
+        ~Client()
+        {
             if( m_socket_uptr!= nullptr )
-                m_socket_uptr->close(); 
+                m_socket_uptr->close();
         }
     private :
         void connect( void );
         void recv( void );
-        
+
     private : /*--- Variables ---*/
         Config m_config;
         SocketUptr m_socket_uptr;
@@ -176,7 +232,7 @@ namespace TcpIp
         /*--- Flags ---*/
         ::std::atomic< bool > m_is_configured{ false };
         ::std::atomic< bool > m_is_connected{ false };
-    }; //class Client 
+    }; //class Client
 
 }; //end namespace TcpIp
 

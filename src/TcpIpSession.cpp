@@ -8,29 +8,37 @@ void Server::Session::recv( void )
      * it will be concurent resource if it will be common.
      * So each receive have its own buffer. */
     BufferShPtr readBuf_shptr = ::std::make_shared< Buffer >(RECV_BUF_SIZE, 0);
-    readBuf_shptr->resize( RECV_BUF_SIZE );
-    m_socket.async_read_some( ::boost::asio::buffer( readBuf_shptr->data(), readBuf_shptr->size() ),
-        [ &, readBuf_shptr ] ( const ErrCode& error, 
-            ::std::size_t bytes_transferred ) //mutable
+    readBuf_shptr->reserve( RECV_BUF_SIZE );
+    m_socket.async_read_some(
+        ::boost::asio::buffer( readBuf_shptr->data(), readBuf_shptr->size() ),
+        [ &, readBuf_shptr ] ( const ErrCode& error,
+            ::std::size_t bytes_transferred ) mutable
         {
             if( error )
             {
+                setValid( false );
                 PRINT_ERR( "Error when reading : %s\n", error.message().c_str() );
                 if( m_socket.is_open() )
                 {
-                    m_socket.shutdown( Socket::shutdown_receive );
+                    m_socket.shutdown( Socket::shutdown_both );
                 }
-                /* TODO : Call for user's error handler. */
+                m_parent_ptr->getConfig().m_error_cb( \
+                    * m_self, error.message().c_str() );
+                m_io_service_ref.post( 
+                    [&]() mutable
+                    {
+                        m_parent_ptr->removeSession( * m_self );
+                    } );
                 return;
             }
-            readBuf_shptr->resize(bytes_transferred);
-            m_parent_ptr->getConfig().m_recv_cb( getIp(), * readBuf_shptr );
+            m_parent_ptr->getConfig().m_recv_cb( * m_self, * readBuf_shptr );
             this->recv();
         } ); //end async_read_until
 }
 
 Server::Session::~Session()
 {
+    setValid( false );
     if( m_socket.is_open() )
     {
         m_socket.shutdown( Socket::shutdown_both );

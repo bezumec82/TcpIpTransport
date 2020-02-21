@@ -23,24 +23,48 @@ LINK_PRIVATE
     Tools
     ${Boost_LIBRARIES}
 )
+if( MINGW )
+  target_link_libraries(
+    ${PROJECT_NAME}
+LINK_PUBLIC
+    ws2_32
+    wsock32
+)
+endif()
 
 ########
 ### Test
 ########
-message( "${MAG}Configuring test : ${PROJECT_NAME}Test.out${NORM}" )
+if( WIN32 )
+    set( EXECUTABLE_NAME ${PROJECT_NAME}Test )
+else()
+    set( EXECUTABLE_NAME ${PROJECT_NAME}Test.out )
+endif()
+
+message( "${MAG}Configuring test : ${EXECUTABLE_NAME}${NORM}" )
 include_directories( ${Boost_INCLUDE_DIRS} )
 message( "${BLU}Boost headers : ${Boost_INCLUDE_DIRS}${NORM}" )
 message( "${BLU}Located boost compiled libs : ${Boost_LIBRARIES}${NORM}" )
 
 file( GLOB CXX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp )
 add_executable(
-    ${PROJECT_NAME}Test.out 
+    ${EXECUTABLE_NAME}
     ${CXX_FILES}
 )
+
 target_link_libraries (
-    ${PROJECT_NAME}Test.out
-LINK_PRIVATE
+    ${EXECUTABLE_NAME}
+LINK_PUBLIC
     ${PROJECT_NAME}
     Tools
     ${Boost_LIBRARIES}
 )
+
+if( MINGW )
+  target_link_libraries(
+    ${EXECUTABLE_NAME}
+LINK_PUBLIC
+    ws2_32
+    wsock32
+)
+endif()
