@@ -3,15 +3,16 @@
 
 #include "TcpIp.h"
 
+
 namespace TcpIp
 {
 
 template< typename Data >
 Result Server::send( SessionView& session, Data&& data )
 {
-    if( session.getValid() )
+    if( session.isValid() )
     {
-        session.session()->send( ::std::forward<Data>(data) );
+        session.session()->send( ::std::forward<Data>( data ) );
         return Result::SEND_SUCCESS;
     }
     else
@@ -23,9 +24,10 @@ Result Server::send( SessionView& session, Data&& data )
 template< typename SessionViewList, typename Data >
 Result Server::multiCast( SessionViewList&& sessions, Data&& data )
 {
-    for( auto& it : sessions )
+    for( const auto& it : sessions )
     {
-        this->send( it, ::std::forward<Data>(data) );
+        if( it.isValid() )
+            this->send( it, ::std::forward<Data>( data ) );
     }
 }
 
@@ -35,19 +37,15 @@ Result Server::broadCast( Data&& data )
     ::std::lock_guard< ::std::mutex > lock( m_sessions_mtx ); //access to sessions
     for( auto& it : m_sessions )
     {
-        if( it.getValid() )
-            it.send( ::std::forward<Data>(data) );
+        if( it.isValid() )
+            it.send( ::std::forward<Data>( data ) );
     }
     return Result::SEND_SUCCESS;
 }
 
-template< typename SessionType >
-void Server::removeSession( SessionType&& session )
-{
-    PRINTF( RED, "Removing session.\n" );
-    ::std::lock_guard< ::std::mutex > lock( m_sessions_mtx );
-    m_sessions.erase( session.session() );
-}
+
+
+
 
 
 } //end namespace TcpIp

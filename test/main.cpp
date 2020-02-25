@@ -4,18 +4,19 @@
 #include "TcpIp.h"
 
 bool keepRunning = true;
+using Session = ::TcpIp::Server::SessionView;
 
 /*--------------------------*/
 /*--- Server's callbacks ---*/
 /*--------------------------*/
-void serverReadCallBack( ::std::string data )
+void serverReadCallBack( const Session& , ::std::string data )
 {
     ::std::cout << __func__ << " : "
                 << "Server received data : \n\t" 
                 << data << ::std::endl;
 }
 
-void serverSendCallBack( ::std::size_t sent_bytes )
+void serverSendCallBack( const Session&, ::std::size_t sent_bytes )
 {
     ::std::cout << __func__ << " : "
                 << "Server sent " 
@@ -23,7 +24,7 @@ void serverSendCallBack( ::std::size_t sent_bytes )
                 << ::std::endl;
 }
 
-void serverErrorCallBack( const ::std::string& error )
+void serverErrorCallBack( const Session& , const ::std::string& error )
 {
     ::std::cout << "Received error : '" << error << "'"<< ::std::endl;
 }
@@ -93,11 +94,11 @@ int main( int, char** )
 
     std::signal(SIGINT, sigIntHandler);
 
-    while (keepRunning)
+    while ( keepRunning )
     {
         ::std::this_thread::sleep_for( TRANSACTION_DELAY );
         client.send( ::std::string{ "DATA_FROM_CLIENT" } );
-        ::std::cout << "--" << ::std::endl
+        ::std::cout << "--" << ::std::endl;
 
         ::std::this_thread::sleep_for( TRANSACTION_DELAY );
         server.broadCast< ::std::string >( ::std::string{ "DATA_TO_CLIENTs" } );

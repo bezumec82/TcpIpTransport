@@ -5,8 +5,10 @@
 #include <functional>
 #include <memory>
 #include <list>
+#include <type_traits>
 
 #include <boost/asio.hpp>
+#include <boost/tti/has_member_function.hpp>
 
 #include "Tools.h"
 
@@ -57,8 +59,8 @@ namespace TcpIp
         class SessionView;
 
     public : /*--- Aliases ---*/
-        using SessionShptr = ::std::shared_ptr< Session >;
-        using Sessions = ::std::list< Session >;
+        using SessionShptr  = ::std::shared_ptr< Session >;
+        using Sessions      = ::std::list< Session >;
         using SessionHandle = Sessions::iterator;
 
         using RecvCallBack  = void( const SessionView&, ::std::string& );
@@ -74,25 +76,32 @@ namespace TcpIp
             ::std::function< ErrorCallBack > m_error_cb;
             ::std::string   m_address; /* IP address to use */
             uint16_t        m_port_num;
+            ::std::string   m_delimiter;
+                /* Each message should have some kind of start-end sequence :
+                <body>
+                    ...
+                </body>
+                */
         }; //end struct Config
 
     private : /* No access to the Session from outside */
         class Session
         {
             friend class Server; //access to the flags
-        public: /*--- Methods ---*/
+            friend class SessionView;
+        public : /*--- Methods ---*/
             /* Session knows about its parent - class Server */
             Session(IoService& io_service, Server * parent)
-                : m_io_service_ref( io_service ),
+                : m_io_service_ref( io_service ), //to post events
                 m_socket( io_service ),
                 m_parent_ptr( parent )
             { }
 
-            Socket& getSocket( void )
+            Socket& socket( void )
             {
                 return m_socket;
             }
-            ::std::string getIp( void )
+            ::std::string getRemoteIp( void )
             {
                 /* TO DO : find better way. Copy ellision not work here.
                  * m_socket.remote_endpoint().address().to_string() IS DEPRECATED */
@@ -106,22 +115,27 @@ namespace TcpIp
             }
             void setValid( bool state )
             {
-                m_self->m_is_valid.store( state );
+                m_is_valid.store( state );
             }
-            bool getValid()
+            bool isValid() const
             {
-                return m_self->m_is_valid.load();
+                return m_is_valid.load();
             }
             /* Taking self to prevent destruction shared ptr */
             void recv( void );
+            void recv( ::std::string& );
             template< typename Data >
             Result send( Data&& );
             ~Session();
-        private:  /*--- Variables ---*/
+        private : /*--- Variables ---*/
             IoService& m_io_service_ref;
             Socket m_socket;
             Server * m_parent_ptr;
             ::std::unique_ptr< SessionView > m_self;
+        private : /*--- Constants ---*/
+            const int READ_BUF_SIZE = 4096;
+        private : /*--- Flags ---*/
+            ::std::atomic< bool > m_is_valid{ false };
         }; //end class Session
 
     public :
@@ -139,14 +153,12 @@ namespace TcpIp
                 return m_session;
             }
         public :
-            bool getValid()
+            bool isValid() const //provides view to the state from the outside
             {
-                m_is_valid.load();
+                m_session->isValid();
             }
         private : /*--- Variables ---*/
             SessionHandle& m_session;
-        private : /*--- Flags ---*/
-            ::std::atomic< bool > m_is_valid{ false };
         }; //end class SessionView
 
     public : /*--- Methods ---*/
@@ -165,8 +177,23 @@ namespace TcpIp
         template< typename Data >
             Result broadCast( Data&& );
 
+        BOOST_TTI_HAS_MEMBER_FUNCTION(session)
         template< typename SessionType >
-            void removeSession( SessionType&& );
+        void removeSession( SessionType&& session )
+        {
+            
+            ::std::lock_guard< ::std::mutex > lock( m_sessions_mtx );
+            if constexpr ( has_member_function_session< SessionType, SessionHandle& >::value )
+            {
+                PRINTF( RED, "Removing session.\n" );
+                m_sessions.erase( session.session() );
+            }
+            else if constexpr ( ::std::is_same< SessionType, Sessions::iterator >::value )
+            {
+                m_sessions.erase( session );
+            }
+        }
+        
         ~Server();
     private :
         void accept( void );
@@ -174,15 +201,16 @@ namespace TcpIp
     private : /*--- Variables ---*/
         Config m_config;
         AcceptorUptr m_acceptor_uptr;
+        IpAddress m_address;
         EndPointUptr m_endpoint_uptr;
+
         Sessions m_sessions;
         ::std::mutex m_sessions_mtx; //protect access to the sessions data
-
-        IpAddress m_address;
 
         IoService m_io_service; //Server has its own io_service
         ::std::thread m_worker;
         ::std::future<void> m_future;
+
         /*--- Flags ---*/
         ::std::atomic< bool > m_is_configured{ false };
         ::std::atomic< bool > m_is_started{ false };
@@ -204,8 +232,9 @@ namespace TcpIp
             ::std::function< SendCallBack >   m_send_cb;
             ::std::function< ErrorCallBack >  m_error_cb;
 
-            ::std::string m_address;
-            uint16_t m_port_num;
+            ::std::string   m_address;
+            uint16_t        m_port_num;
+            ::std::string   m_delimiter; //look 'Server::Config'
         }; //end struct Config
 
     public : /*--- Methods ---*/
@@ -221,7 +250,7 @@ namespace TcpIp
     private :
         void connect( void );
         void recv( void );
-
+        void recv( ::std::string& );
     private : /*--- Variables ---*/
         Config m_config;
         SocketUptr m_socket_uptr;
@@ -229,6 +258,8 @@ namespace TcpIp
         EndPointUptr m_endpoint_uptr;
         IoService m_io_service;
         ::std::thread m_worker;
+        /*--- Constants ---*/
+        const int READ_BUF_SIZE = 4096;
         /*--- Flags ---*/
         ::std::atomic< bool > m_is_configured{ false };
         ::std::atomic< bool > m_is_connected{ false };

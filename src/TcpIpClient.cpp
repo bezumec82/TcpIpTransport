@@ -68,7 +68,11 @@ void Client::connect()
         PRINTF( GRN, "Successfully connected to the server '%s'.\n", 
                 m_endpoint_uptr->address().to_string().c_str() );
         m_is_connected.store( true );
-        this->recv();
+
+        if( m_config.m_delimiter == "" )
+            this->recv();
+        else this->recv( m_config.m_delimiter );
+
     } catch( const ::std::exception& e ) {
         PRINT_ERR( "%s.\n", e.what() );
     }
@@ -82,11 +86,11 @@ void Client::connect()
 
 void Client::recv( void )
 {
-    BufferShPtr readBuf_shptr = ::std::make_shared< Buffer >();
-    readBuf_shptr->resize( RECV_BUF_SIZE );
+    BufferShPtr read_buf_shptr = ::std::make_shared< Buffer >();
+    read_buf_shptr->resize( RECV_BUF_SIZE );
     m_socket_uptr->async_read_some(
-        ::boost::asio::buffer( readBuf_shptr->data(), readBuf_shptr->size() ),
-        [ &, readBuf_shptr ] ( const ErrCode& error, 
+        ::boost::asio::buffer( read_buf_shptr->data(), read_buf_shptr->size() ),
+        [ &, read_buf_shptr ] ( const ErrCode& error, 
             ::std::size_t bytes_transferred ) //mutable
         {
             if( error )
@@ -98,8 +102,34 @@ void Client::recv( void )
                 }
                 return;
             }
-            m_config.m_recv_cb( * readBuf_shptr );
+            read_buf_shptr->resize( bytes_transferred );
+            m_config.m_recv_cb( * read_buf_shptr );
             this->recv();
+        } ); //end async_read_until
+}
+
+void Client::recv( ::std::string& msg_delimiter )
+{
+    BufferShPtr read_buf_shptr = ::std::make_shared< Buffer >();
+    read_buf_shptr->reserve( READ_BUF_SIZE );
+
+    ::boost::asio::async_read_until( * m_socket_uptr,
+        ::boost::asio::dynamic_buffer( * read_buf_shptr ),
+        ::std::string{ msg_delimiter },
+        [ & , read_buf_shptr ] ( const ErrCode& error, 
+            ::std::size_t bytes_transferred ) //mutable
+        {
+            if( error )
+            {
+                PRINT_ERR( "Error when reading : %s\n", error.message().c_str() );
+                if( m_socket_uptr->is_open() )
+                {
+                    m_socket_uptr->shutdown( Socket::shutdown_receive );
+                }
+                return;
+            }
+            m_config.m_recv_cb( * read_buf_shptr );
+            this->recv( msg_delimiter );
         } ); //end async_read_until
 }
 

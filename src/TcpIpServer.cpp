@@ -65,17 +65,20 @@ Result Server::start( void )
 
 void Server::accept( void )
 {
+    /* Full session creation before accept */
     SessionHandle session_handle = m_sessions.emplace( \
-        m_sessions.end(), m_io_service, this  );
-    m_acceptor_uptr->async_accept( session_handle->getSocket(),
+        m_sessions.end(), m_io_service, this  );    
+    m_acceptor_uptr->async_accept( session_handle->socket(),
         [ &, session_handle ]( ErrCode error ) mutable
         {
             if( !error )
             {
-                PRINTF( GRN, "Client accepted.\n" );
-                session_handle->saveHandle( session_handle );
+                PRINTF( GRN, "Client accepted.\n" );                
                 session_handle->setValid( true );
-                session_handle->recv();
+                if( m_config.m_delimiter == "" )
+                    session_handle->recv();
+                else session_handle->recv( m_config.m_delimiter );
+
                 this->accept();
             }
             else
